@@ -1,0 +1,117 @@
+{
+  "identity": {
+    "persona": "E1: The Anti-AI Designer",
+    "archetype": "Swiss & High-Contrast (Authority, Clarity, Truth)",
+    "core_principles": [
+      "Fusion over Imitation: Mix Swiss Poster aesthetics with SaaS functionality.",
+      "Emotion First: The UI must feel 'True' and 'Analytical'.",
+      "Content is King: The review text is the hero.",
+      "Negative Space: High density data needs breathing room.",
+      "Contrast: Stark black/white with signal colors for Fake/Genuine."
+    ]
+  },
+  "typography": {
+    "primary_font": "Chivo",
+    "secondary_font": "IBM Plex Sans",
+    "font_import_url": "https://fonts.googleapis.com/css2?family=Chivo:wght@300;400;700;900&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap",
+    "usage": {
+      "headings": "font-['Chivo'] font-bold tracking-tight uppercase",
+      "body": "font-['IBM_Plex_Sans'] text-base leading-relaxed",
+      "mono": "font-mono text-sm tracking-wide"
+    }
+  },
+  "colors": {
+    "theme": "light",
+    "palette": {
+      "background": "#FFFFFF",
+      "foreground": "#0A0A0A",
+      "primary": "#002FA7",
+      "primary_foreground": "#FFFFFF",
+      "secondary": "#F3F4F6",
+      "secondary_foreground": "#111827",
+      "muted": "#F9FAFB",
+      "muted_foreground": "#6B7280",
+      "border": "#E5E7EB",
+      "input": "#F3F4F6",
+      "ring": "#002FA7",
+      "status_genuine": "#059669",
+      "status_fake": "#DC2626"
+    },
+    "tailwind_config_extension": {
+      "colors": {
+        "brand": {
+          "blue": "#002FA7",
+          "genuine": "#059669",
+          "fake": "#DC2626"
+        }
+      }
+    }
+  },
+  "visual_enhancers": {
+    "surface_style": "Grid Borders (The Technical Look)",
+    "border_radius": "rounded-none",
+    "shadows": "none",
+    "textures": "Subtle noise overlay on the background to prevent sterility.",
+    "animations": {
+      "hover": "transition-colors duration-200 ease-out",
+      "micro_interactions": "Buttons invert colors on hover (Solid Black -> White w/ Black Border)."
+    }
+  },
+  "layout": {
+    "spacing_system": "Generous. Use p-8 or p-12 for containers.",
+    "grid_strategy": "Bento Grid Mode B (High Density) for the dashboard, Mode A (Tetris) for the landing.",
+    "container_width": "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
+  },
+  "components": {
+    "buttons": {
+      "style": "Sharp edges (rounded-none). High contrast. Primary: Blue bg, White text. Secondary: White bg, Black border.",
+      "hover": "hover:bg-black hover:text-white transition-all"
+    },
+    "cards": {
+      "style": "No shadow. 1px solid border (border-gray-200). White background.",
+      "header": "Border-bottom 1px solid gray-100. Bold uppercase title."
+    },
+    "inputs": {
+      "style": "bg-gray-50 border-b-2 border-gray-200 focus:border-brand-blue focus:ring-0 rounded-none px-4 py-3"
+    },
+    "charts": {
+      "library": "Recharts (via Shadcn)",
+      "style": "Minimalist. Thin lines. No grid lines in the chart area if possible. Use brand colors."
+    }
+  },
+  "assets": {
+    "images": [
+      {
+        "category": "hero_abstract",
+        "url": "https://images.pexels.com/photos/1089438/pexels-photo-1089438.jpeg",
+        "description": "Abstract light technology background, clean and analytical."
+      },
+      {
+        "category": "analysis_concept",
+        "url": "https://images.pexels.com/photos/8296035/pexels-photo-8296035.jpeg",
+        "description": "Magnifying glass on document, representing scrutiny."
+      }
+    ],
+    "icons": "Lucide React (default). Use thin strokes (stroke-width={1.5}) for a precise look."
+  },
+  "instructions_to_main_agent": [
+    "1. SETUP: Install 'clsx' and 'tailwind-merge' if missing. Update 'tailwind.config.js' with the new colors and font families.",
+    "2. FONTS: Add the Google Fonts import to 'index.css'. Apply the font families to the body and headings.",
+    "3. GLOBAL STYLES: In 'index.css', set the root variables to the Light Theme palette defined above. Remove any default dark mode variables if they conflict.",
+    "4. LAYOUT: Create a 'Layout' component that includes a sticky header (Glassmorphism: bg-white/80 backdrop-blur-md border-b) and a footer.",
+    "5. PAGES:",
+    "   - HOME: Hero section with the 'analysis_concept' image. Large 'Check Review' input area (central focus).",
+    "   - DASHBOARD: Use the Bento Grid. Widgets for 'Total Reviews Scanned', 'Fake vs Genuine Ratio', 'Recent Activity'.",
+    "   - HISTORY: A clean table view using Shadcn Table. Use badges for 'Fake'/'Genuine' status.",
+    "6. COMPONENTS: Customize Shadcn components to match the 'Swiss' aesthetic (remove rounded corners, increase contrast).",
+    "7. MICRO-INTERACTIONS: Add hover states to all interactive elements. Use 'sonner' for toast notifications on successful analysis."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Do not use gradients for backgrounds. Use solid colors or subtle noise.",
+    "Avoid 'Inter' for headings. Use 'Chivo'.",
+    "Ensure all text has high contrast (APCA standards).",
+    "Use 'data-testid' for all interactive elements.",
+    "Do not center-align long text blocks.",
+    "Use 'sonner' for toasts."
+  ]
+}
