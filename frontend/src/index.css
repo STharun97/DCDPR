@@ -6,31 +6,31 @@
 
 @layer base {
     :root {
-        --background: 0 0% 100%;
-        --foreground: 0 0% 4%;
+        --background: 220 20% 97%;
+        --foreground: 220 10% 15%;
         --card: 0 0% 100%;
-        --card-foreground: 0 0% 4%;
+        --card-foreground: 220 10% 15%;
         --popover: 0 0% 100%;
-        --popover-foreground: 0 0% 4%;
-        --primary: 224 100% 33%;
+        --popover-foreground: 220 10% 15%;
+        --primary: 230 100% 60%;
         --primary-foreground: 0 0% 100%;
         --secondary: 220 14% 96%;
         --secondary-foreground: 220 9% 8%;
-        --muted: 220 14% 98%;
+        --muted: 220 14% 95%;
         --muted-foreground: 220 9% 46%;
-        --accent: 220 14% 96%;
-        --accent-foreground: 220 9% 8%;
-        --destructive: 0 84% 60%;
+        --accent: 230 100% 60%;
+        --accent-foreground: 0 0% 100%;
+        --destructive: 348 83% 47%;
         --destructive-foreground: 0 0% 100%;
         --border: 220 13% 91%;
-        --input: 220 14% 96%;
-        --ring: 224 100% 33%;
-        --radius: 0;
+        --input: 220 14% 94%;
+        --ring: 230 100% 60%;
+        --radius: 1.25rem;
         
-        /* Custom brand colors */
-        --brand-blue: 224 100% 33%;
-        --brand-genuine: 160 84% 39%;
-        --brand-fake: 0 84% 50%;
+        /* Custom brand colors with vibrant hues */
+        --brand-blue: 230 100% 60%;
+        --brand-genuine: 152 69% 31%;
+        --brand-fake: 348 83% 47%;
     }
 }
 
@@ -50,7 +50,7 @@
     }
 }
 
-/* Swiss Design Aesthetic */
+/* Premium Design Aesthetic */
 .font-heading {
     font-family: 'Chivo', sans-serif;
 }
@@ -59,35 +59,35 @@
     font-family: 'IBM Plex Sans', sans-serif;
 }
 
-/* Sharp edges for all interactive elements */
+/* Beautiful curved edges for interactive elements */
 .btn-sharp {
-    @apply rounded-none transition-colors duration-200;
+    @apply rounded-2xl transition-all duration-300;
 }
 
-/* Card styling - no shadow, border only */
+/* Card styling - soft shadow, elegant border */
 .card-swiss {
-    @apply bg-white border border-gray-200 rounded-none;
+    @apply bg-white/80 backdrop-blur-xl border border-white/40 shadow-[0_8px_30px_rgb(0,0,0,0.04)] rounded-3xl overflow-hidden;
 }
 
 /* Input styling */
 .input-swiss {
-    @apply bg-gray-50 border-0 border-b-2 border-gray-200 rounded-none px-4 py-3;
-    @apply focus:border-[#002FA7] focus:ring-0 focus:outline-none;
-    @apply transition-colors duration-200;
+    @apply bg-white/60 border border-gray-200/60 rounded-2xl px-5 py-4 shadow-inner ring-offset-white;
+    @apply focus:border-brand-blue/50 focus:ring-4 focus:ring-brand-blue/10 focus:bg-white focus:outline-none;
+    @apply transition-all duration-300;
 }
 
 /* Glassmorphism header */
 .glass-header {
-    @apply bg-white/80 backdrop-blur-md border-b border-gray-100;
+    @apply bg-white/70 backdrop-blur-xl border-b border-white/50 shadow-sm supports-[backdrop-filter]:bg-white/60;
 }
 
-/* Status badges */
+/* Status badges with soft backgrounds */
 .badge-genuine {
-    @apply bg-emerald-50 text-emerald-700 border border-emerald-200;
+    @apply bg-emerald-100/80 text-emerald-800 border border-emerald-200/50 shadow-sm backdrop-blur-sm;
 }
 
 .badge-fake {
-    @apply bg-red-50 text-red-700 border border-red-200;
+    @apply bg-rose-100/80 text-rose-800 border border-rose-200/50 shadow-sm backdrop-blur-sm;
 }
 
 /* Noise texture overlay */
@@ -142,25 +142,25 @@
 }
 
 .animate-fill-meter {
-    animation: fillMeter 0.8s ease-out forwards;
+    animation: fillMeter 1s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
 /* Hover effects for interactive elements */
 .hover-lift {
-    @apply transition-transform duration-200;
+    @apply transition-transform duration-300;
 }
 
 .hover-lift:hover {
-    transform: translateY(-2px);
+    transform: translateY(-4px) scale(1.02);
 }
 
-/* Button hover - invert colors */
+/* Button hover - gradient invert */
 .btn-invert {
-    @apply transition-all duration-200;
+    @apply transition-all duration-300;
 }
 
 .btn-invert:hover {
-    @apply bg-black text-white;
+    @apply bg-gradient-to-r from-gray-900 to-black text-white shadow-xl shadow-gray-900/20 translate-y-[-2px];
 }
 
 /* Table styling */

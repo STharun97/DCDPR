@@ -1,11 +1,25 @@
 """
 Prediction Module for Fake Review Detection
 Loads trained model and makes predictions with confidence scores
+Includes Explainable AI (XAI) via SHAP for token-level explanations.
 """
 import numpy as np
+import logging
 from pathlib import Path
 from .text_preprocessor import preprocessor
 from .model_trainer import ModelTrainer
+
+logger = logging.getLogger(__name__)
+
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except ImportError:
+    SHAP_AVAILABLE = False
+    logger.warning("SHAP not available. XAI explanations will be disabled.")
+
+from .ai_text_detector import ai_detector
+from .sentiment_analyzer import sentiment_analyzer
 
 
 class ReviewPredictor:
@@ -14,6 +28,7 @@ class ReviewPredictor:
     def __init__(self):
         self.trainer = ModelTrainer()
         self.is_loaded = False
+        self._shap_explainer = None  # Lazy-loaded SHAP explainer
         self._initialize()
     
     def _initialize(self):
@@ -29,7 +44,7 @@ class ReviewPredictor:
             self.is_loaded = True
             print("Predictor initialized with newly trained models")
     
-    def predict(self, review_text: str) -> dict:
+    def predict(self, review_text: str, rating: int = None) -> dict:
         """
         Predict if a review is fake or genuine
         
@@ -77,6 +92,15 @@ class ReviewPredictor:
         # Analyze text features that contributed to the prediction
         indicators = self._analyze_indicators(original_text, processed_text)
         
+        # Get SHAP explanation
+        shap_explanation = self.explain(processed_text, original_text)
+        
+        # AI-generated text detection
+        ai_detection = ai_detector.detect(original_text)
+        
+        # Sentiment-rating inconsistency analysis
+        sentiment_analysis = sentiment_analyzer.analyze(original_text, rating)
+        
         return {
             'prediction': label,
             'is_fake': bool(prediction == 1),
@@ -85,7 +109,10 @@ class ReviewPredictor:
             'genuine_probability': round(genuine_prob * 100, 2),
             'model_used': self.trainer.best_model_name,
             'indicators': indicators,
-            'processed_text': processed_text
+            'processed_text': processed_text,
+            'shap_explanation': shap_explanation,
+            'ai_detection': ai_detection,
+            'sentiment_analysis': sentiment_analysis
         }
     
     def _analyze_indicators(self, original: str, processed: str) -> list:
@@ -159,6 +186,113 @@ class ReviewPredictor:
             })
         
         return indicators
+    
+    def _get_shap_explainer(self):
+        """Lazily initialize the SHAP explainer for the best model."""
+        if not SHAP_AVAILABLE:
+            return None
+        if self._shap_explainer is not None:
+            return self._shap_explainer
+        
+        model = self.trainer.best_model
+        model_name = self.trainer.best_model_name
+        
+        try:
+            # Build a small background dataset from the vectorizer vocabulary
+            # (sparse matrix of zeros works as the "null" baseline for linear models)
+            import scipy.sparse as sp
+            background = sp.csr_matrix(np.zeros((1, len(self.trainer.vectorizer.vocabulary_))))
+            self._shap_explainer = shap.LinearExplainer(model, background, feature_perturbation="interventional")
+            logger.info(f"SHAP LinearExplainer initialized for {model_name}")
+        except Exception as e:
+            logger.warning(f"Could not initialize ShapLinearExplainer ({e}). Falling back to KernelExplainer.")
+            try:
+                # Fallback: wrap predict_proba in a simple callable
+                def model_predict(X):
+                    if hasattr(model, 'predict_proba'):
+                        return model.predict_proba(X)[:, 1]
+                    import scipy.sparse as sp_
+                    Xsp = sp_.csr_matrix(X)
+                    dec = model.decision_function(Xsp)
+                    return 1 / (1 + np.exp(-dec))
+                
+                import scipy.sparse as sp2
+                bg = sp2.csr_matrix(np.zeros((1, len(self.trainer.vectorizer.vocabulary_))))
+                self._shap_explainer = shap.KernelExplainer(model_predict, bg)
+            except Exception as e2:
+                logger.error(f"SHAP initialization completely failed: {e2}")
+                self._shap_explainer = None
+        
+        return self._shap_explainer
+    
+    def explain(self, processed_text: str, original_text: str = None, top_n: int = 10) -> dict:
+        """
+        Generate a SHAP-based token-level explanation for the prediction.
+        
+        Returns a dict with:
+          - top_fake_tokens: words most responsible for FAKE classification
+          - top_genuine_tokens: words most responsible for GENUINE classification
+          - token_scores: list of {word, score, impact} for all tokens in the review
+          - method: explanation method used
+        """
+        if not SHAP_AVAILABLE:
+            return {'error': 'SHAP not installed', 'top_fake_tokens': [], 'top_genuine_tokens': [], 'token_scores': []}
+        
+        explainer = self._get_shap_explainer()
+        if explainer is None:
+            return {'error': 'Explainer not available', 'top_fake_tokens': [], 'top_genuine_tokens': [], 'token_scores': []}
+        
+        try:
+            text_vector = self.trainer.vectorizer.transform([processed_text])
+            shap_values = explainer.shap_values(text_vector)
+            
+            # shap_values shape: (1, n_features) or list
+            if isinstance(shap_values, list):
+                # Multi-class: take the FAKE class (index 1)
+                sv = np.array(shap_values[1]).flatten()
+            else:
+                sv = np.array(shap_values).flatten()
+            
+            # Map feature indices to words
+            feature_names = self.trainer.vectorizer.get_feature_names_out()
+            
+            # Get the non-zero feature indices present in this review
+            text_vector_csr = text_vector.tocsr()
+            present_indices = text_vector_csr.indices
+            
+            token_scores = []
+            for idx in present_indices:
+                word = feature_names[idx]
+                score = float(sv[idx])
+                token_scores.append({
+                    'word': word,
+                    'shap_value': round(score, 6),
+                    'impact': 'fake' if score > 0 else 'genuine'
+                })
+            
+            # Sort by absolute impact
+            token_scores.sort(key=lambda x: abs(x['shap_value']), reverse=True)
+            
+            top_fake = [
+                {'word': t['word'], 'score': round(t['shap_value'], 4)}
+                for t in token_scores if t['impact'] == 'fake'
+            ][:top_n]
+            
+            top_genuine = [
+                {'word': t['word'], 'score': round(abs(t['shap_value']), 4)}
+                for t in token_scores if t['impact'] == 'genuine'
+            ][:top_n]
+            
+            return {
+                'top_fake_tokens': top_fake,
+                'top_genuine_tokens': top_genuine,
+                'token_scores': token_scores[:top_n * 2],
+                'method': 'shap_linear'
+            }
+        
+        except Exception as e:
+            logger.error(f"SHAP explain failed: {e}")
+            return {'error': str(e), 'top_fake_tokens': [], 'top_genuine_tokens': [], 'token_scores': []}
     
     def get_model_metrics(self) -> dict:
         """Get performance metrics of all trained models"""
