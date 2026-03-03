@@ -578,20 +578,31 @@ async def analyze_url(data: URLAnalysisInput):
         url = data.url
         logger.info(f"Analyzing URL: {url}")
         
-        # Scrape reviews
+        # Scrape reviews — use a timeout so cloud deployments don't hang if Amazon blocks the IP
         scraped_data = None
-        
-        if "amazon" in url.lower() or "amzn" in url.lower():
-            scraped_data = await scraper.scrape_amazon(url)
+        CLOUD_MODE = os.getenv("CLOUD_MODE", "false").lower() == "true"
+
+        if CLOUD_MODE:
+            logger.info("CLOUD_MODE=true — skipping live scraping, using demo data.")
+        elif "amazon" in url.lower() or "amzn" in url.lower():
+            try:
+                scraped_data = await asyncio.wait_for(scraper.scrape_amazon(url), timeout=25.0)
+            except asyncio.TimeoutError:
+                logger.warning("Amazon scraping timed out (likely blocked by cloud IP). Using fallback demo data.")
+            except Exception as e:
+                logger.warning(f"Amazon scraping error: {e}. Using fallback demo data.")
         elif "flipkart" in url.lower():
-            scraped_data = await scraper.scrape_flipkart(url)
+            try:
+                scraped_data = await asyncio.wait_for(scraper.scrape_flipkart(url), timeout=25.0)
+            except asyncio.TimeoutError:
+                logger.warning("Flipkart scraping timed out. Using fallback demo data.")
+            except Exception as e:
+                logger.warning(f"Flipkart scraping error: {e}. Using fallback demo data.")
         else:
-            # Fallback to demo/mock if requested or unknown URL in dev
             if "demo" in url.lower():
-                 scraped_data = scraper.get_mock_data()
-        
-        # If scraping failed or returned None, use mock data as fallback for now
-        # to ensure the feature is demonstrable even if blocked
+                scraped_data = scraper.get_mock_data()
+
+        # If scraping failed or returned None, use mock data as fallback
         if not scraped_data:
             logger.warning("Scraping failed or blocked. Using fallback demo data.")
             scraped_data = scraper.get_mock_data()
