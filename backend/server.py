@@ -57,12 +57,20 @@ if ENABLE_DB:
         ENABLE_DB = False
 else:
     logger.info("MongoDB disabled via environment variable")
-
 # Create the main app
 app = FastAPI(
     title="Fake Review Detection API",
     description="ML-powered fake product review detection system",
     version="2.0.0"
+)
+
+# Configure CORS for all domains
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
 )
 
 # Create API router with /api prefix
