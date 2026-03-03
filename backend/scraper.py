@@ -1,3 +1,4 @@
+import requests
 from playwright.async_api import async_playwright
 import logging
 import re
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 BROWSER_DATA_DIR = os.path.join(os.path.expanduser("~"), ".fprds_browser_data")
 
 # Maximum pages to paginate through (10 reviews per page)
-MAX_PAGES = 50  # Up to 500 reviews
+MAX_PAGES = 10  # Up to 100 reviews (ScraperAPI credits: 5 per rendered page)
 
 # Stealth JavaScript to avoid bot detection
 STEALTH_JS = """
@@ -109,8 +110,6 @@ def _extract_rating_summary(soup):
         if match:
             summary['total_ratings'] = int(match.group(1).replace(',', ''))
     
-    # Star distribution using aria-label attributes
-    # Amazon uses: aria-label="76 percent of reviews have 5 stars"
     all_links = soup.select('a[aria-label]')
     for link in all_links:
         label = link.get('aria-label', '')
@@ -123,77 +122,139 @@ def _extract_rating_summary(soup):
     return summary
 
 
-async def _create_browser_context(playwright):
-    """Create a persistent browser context with stealth settings.
-    
-    Uses a persistent user data directory so Amazon login cookies
-    are preserved between scraping sessions. The user only needs
-    to sign in once.
-    """
-    context = await playwright.chromium.launch_persistent_context(
-        BROWSER_DATA_DIR,
-        headless=False,
-        slow_mo=150,
-        args=[
-            "--start-maximized",
-            "--disable-blink-features=AutomationControlled",
-        ],
-        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        no_viewport=True,
-        locale='en-IN',
-        timezone_id='Asia/Kolkata',
-    )
-    await context.add_init_script(STEALTH_JS)
-    return context
+def _scraperapi_fetch_sync(target_url, api_key, render=True):
+    """Synchronously fetch a URL via ScraperAPI."""
+    try:
+        params = {
+            "api_key": api_key,
+            "url": target_url,
+        }
+        if render:
+            params["render"] = "true"
+        response = requests.get("http://api.scraperapi.com", params=params, timeout=70)
+        if response.status_code == 200:
+            return response.text
+        else:
+            logger.warning(f"ScraperAPI status {response.status_code} for {target_url}")
+            return None
+    except Exception as e:
+        logger.error(f"ScraperAPI request failed: {e}")
+        return None
 
 
-async def _handle_signin_wall(page, timeout_seconds=120):
-    """Wait for user to manually sign in if Amazon requires it.
-    
-    Returns True if sign-in was completed, False if timed out.
-    Handles sign-in, CVF (verification), and claim pages.
-    """
-    signin_patterns = ["/ap/signin", "/ax/claim", "/ap/cvf", "/ap/mfa"]
-    
-    def _is_signin_page(url):
-        return any(p in url for p in signin_patterns)
-    
-    current_url = page.url
-    if not _is_signin_page(current_url):
-        return True  # Not on sign-in page
-    
-    logger.warning(f"Amazon sign-in required. Waiting up to {timeout_seconds}s for manual sign-in...")
-    logger.warning("Please sign in to Amazon in the browser window that opened.")
-    
-    for i in range(timeout_seconds):
-        await asyncio.sleep(1)
-        current_url = page.url
-        if not _is_signin_page(current_url):
-            logger.info(f"Sign-in completed after {i+1} seconds! URL: {current_url[:80]}")
-            await asyncio.sleep(3)  # Wait for page to finish loading
-            return True
-    
-    logger.error("Sign-in timed out!")
-    return False
+async def _scraperapi_fetch(target_url, api_key, render=True):
+    """Async wrapper around ScraperAPI using a thread executor to not block the event loop."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _scraperapi_fetch_sync, target_url, api_key, render)
 
 
 async def scrape_amazon(url):
-    """Scrape ALL reviews from an Amazon product by paginating through review pages.
+    """Scrape reviews from an Amazon product URL.
     
-    Uses a persistent browser context that saves login cookies.
-    If Amazon requires sign-in, the browser window stays open for the user
-    to manually log in. After login, cookies are saved for future sessions.
-    
-    Strategy:
-    1. Navigate to product page (get title, rating summary)
-    2. Navigate to review listing page (using ASIN)
-    3. If sign-in is required, wait for manual sign-in (cookies saved for next time)
-    4. After sign-in, explicitly navigate to the review page
-    5. Paginate through all review pages collecting reviews
-    6. Return all reviews + rating summary
+    Uses ScraperAPI (residential proxy) when SCRAPERAPI_KEY env var is set — 
+    this works from cloud servers and bypasses Amazon bot detection.
+    Falls back to local Playwright-based scraping if no API key is set.
     """
-    logger.info(f"Scraping Amazon URL: {url}")
+    api_key = os.getenv("SCRAPERAPI_KEY")
     
+    if api_key:
+        return await _scrape_amazon_via_scraperapi(url, api_key)
+    else:
+        return await _scrape_amazon_via_playwright(url)
+
+
+async def _scrape_amazon_via_scraperapi(url, api_key):
+    """Scrape Amazon reviews using ScraperAPI (works from cloud deployments)."""
+    logger.info(f"Scraping Amazon via ScraperAPI: {url}")
+    
+    asin = _extract_asin(url)
+    if not asin:
+        logger.warning("Could not extract ASIN from URL")
+        return None
+    
+    logger.info(f"ASIN: {asin}")
+    
+    # Fetch product page for title and rating summary
+    product_url = f"https://www.amazon.in/dp/{asin}"
+    html = await _scraperapi_fetch(product_url, api_key)
+    
+    product_title = "Amazon Product"
+    rating_summary = {}
+    
+    if html:
+        soup = BeautifulSoup(html, "html.parser")
+        title_elem = soup.select_one("#productTitle")
+        if title_elem:
+            product_title = title_elem.get_text(strip=True)
+        rating_summary = _extract_rating_summary(soup)
+        logger.info(f"Product: {product_title}")
+    
+    # Paginate through review pages
+    all_reviews = []
+    for page_num in range(1, MAX_PAGES + 1):
+        review_url = (
+            f"https://www.amazon.in/product-reviews/{asin}"
+            f"?reviewerType=all_reviews&pageNumber={page_num}"
+        )
+        html = await _scraperapi_fetch(review_url, api_key)
+        if not html:
+            break
+        
+        soup = BeautifulSoup(html, "html.parser")
+        page_reviews = _parse_reviews_from_soup(soup)
+        
+        if not page_reviews:
+            logger.info(f"No reviews on page {page_num}. Done paginating.")
+            break
+        
+        all_reviews.extend(page_reviews)
+        logger.info(f"Page {page_num}: {len(page_reviews)} reviews (total: {len(all_reviews)})")
+    
+    if not all_reviews:
+        logger.warning("No reviews scraped via ScraperAPI.")
+        return None
+    
+    # Deduplicate
+    seen = set()
+    unique_reviews = []
+    for r in all_reviews:
+        if r['review_text'] not in seen:
+            seen.add(r['review_text'])
+            unique_reviews.append(r)
+    
+    logger.info(f"Final review count: {len(unique_reviews)} for '{product_title}'")
+    return {
+        'product_title': product_title,
+        'reviews': unique_reviews,
+        'rating_summary': rating_summary
+    }
+
+
+async def _scrape_amazon_via_playwright(url):
+    """Original Playwright-based scraper for local use."""
+    logger.info(f"Scraping Amazon URL via Playwright: {url}")
+    
+    async def _create_browser_context(playwright):
+        context = await playwright.chromium.launch_persistent_context(
+            BROWSER_DATA_DIR,
+            headless=True,
+            slow_mo=150,
+            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            locale='en-IN',
+            timezone_id='Asia/Kolkata',
+        )
+        await context.add_init_script(STEALTH_JS)
+        return context
+
+    async def _handle_signin_wall(page, timeout_seconds=30):
+        signin_patterns = ["/ap/signin", "/ax/claim", "/ap/cvf", "/ap/mfa"]
+        if not any(p in page.url for p in signin_patterns):
+            return True
+        logger.warning("Amazon sign-in wall detected on cloud — returning None")
+        return False
+
+
     async with async_playwright() as p:
         try:
             context = await _create_browser_context(p)
