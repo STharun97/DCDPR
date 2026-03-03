@@ -586,7 +586,7 @@ async def analyze_url(data: URLAnalysisInput):
             logger.info("CLOUD_MODE=true — skipping live scraping, using demo data.")
         elif "amazon" in url.lower() or "amzn" in url.lower():
             try:
-                scraped_data = await asyncio.wait_for(scraper.scrape_amazon(url), timeout=25.0)
+                scraped_data = await asyncio.wait_for(scraper.scrape_amazon(url), timeout=90.0)
             except asyncio.TimeoutError:
                 logger.warning("Amazon scraping timed out (likely blocked by cloud IP). Using fallback demo data.")
             except Exception as e:

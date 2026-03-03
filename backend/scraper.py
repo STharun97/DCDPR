@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 BROWSER_DATA_DIR = os.path.join(os.path.expanduser("~"), ".fprds_browser_data")
 
 # Maximum pages to paginate through (10 reviews per page)
-MAX_PAGES = 10  # Up to 100 reviews (ScraperAPI credits: 5 per rendered page)
+MAX_PAGES = 3  # Keep within Render's 30s request timeout (3 pages = ~30 reviews)
 
 # Stealth JavaScript to avoid bot detection
 STEALTH_JS = """
@@ -122,16 +122,17 @@ def _extract_rating_summary(soup):
     return summary
 
 
-def _scraperapi_fetch_sync(target_url, api_key, render=True):
-    """Synchronously fetch a URL via ScraperAPI."""
+def _scraperapi_fetch_sync(target_url, api_key):
+    """Synchronously fetch a URL via ScraperAPI without JS rendering (fast, 5-10s)."""
     try:
         params = {
             "api_key": api_key,
             "url": target_url,
+            "premium": "true",       # better residential IPs
+            "country_code": "in",    # Indian IPs for amazon.in
+            "keep_headers": "true",
         }
-        if render:
-            params["render"] = "true"
-        response = requests.get("http://api.scraperapi.com", params=params, timeout=70)
+        response = requests.get("http://api.scraperapi.com", params=params, timeout=25)
         if response.status_code == 200:
             return response.text
         else:
@@ -142,10 +143,10 @@ def _scraperapi_fetch_sync(target_url, api_key, render=True):
         return None
 
 
-async def _scraperapi_fetch(target_url, api_key, render=True):
-    """Async wrapper around ScraperAPI using a thread executor to not block the event loop."""
+async def _scraperapi_fetch(target_url, api_key):
+    """Async wrapper around ScraperAPI."""
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _scraperapi_fetch_sync, target_url, api_key, render)
+    return await loop.run_in_executor(None, _scraperapi_fetch_sync, target_url, api_key)
 
 
 async def scrape_amazon(url):
