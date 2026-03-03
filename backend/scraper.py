@@ -123,20 +123,18 @@ def _extract_rating_summary(soup):
 
 
 def _scraperapi_fetch_sync(target_url, api_key):
-    """Synchronously fetch a URL via ScraperAPI without JS rendering (fast, 5-10s)."""
+    """Synchronously fetch a URL via ScraperAPI (free tier, no JS rendering)."""
     try:
         params = {
             "api_key": api_key,
             "url": target_url,
-            "premium": "true",       # better residential IPs
-            "country_code": "in",    # Indian IPs for amazon.in
-            "keep_headers": "true",
         }
-        response = requests.get("http://api.scraperapi.com", params=params, timeout=25)
+        response = requests.get("http://api.scraperapi.com", params=params, timeout=30)
+        logger.info(f"ScraperAPI response: {response.status_code} for {target_url[:60]}")
         if response.status_code == 200:
             return response.text
         else:
-            logger.warning(f"ScraperAPI status {response.status_code} for {target_url}")
+            logger.warning(f"ScraperAPI failed with status {response.status_code}")
             return None
     except Exception as e:
         logger.error(f"ScraperAPI request failed: {e}")
