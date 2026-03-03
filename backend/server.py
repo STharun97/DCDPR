@@ -64,20 +64,13 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# Configure CORS for all domains
+# Configure CORS - allow all origins (credentials must be False when using wildcard)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://dcdpr.onrender.com",
-        "https://reviewguard-dcdpr.netlify.app",
-        "https://unique-crisp-6dc8b4.netlify.app"
-    ],
-    allow_origin_regex=r"https://.*\.netlify\.app",
-    allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Create API router with /api prefix
