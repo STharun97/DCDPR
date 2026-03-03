@@ -247,15 +247,15 @@ const UrlAnalysisPage = () => {
     const [url, setUrl] = useState('');
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState(null);
-    const [amazonLoggedIn, setAmazonLoggedIn] = useState(false);
-    const [loginLoading, setLoginLoading] = useState(false);
-    const [isAnalyzing, setIsAnalyzing] = useState(false); // New state for analysis loading
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [expandedXAI, setExpandedXAI] = useState(false); // New state for XAI explanation
+
+    const BACKEND = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8002';
 
     const exportReport = async () => {
         try {
             toast.info("Generating PDF report...");
-            const response = await fetch('http://localhost:8002/api/report/url', {
+            const response = await fetch(`${BACKEND}/api/report/url`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(result)
@@ -281,41 +281,14 @@ const UrlAnalysisPage = () => {
         }
     };
 
-    // Check Amazon login status on mount
-    useEffect(() => {
-        fetch('http://localhost:8002/api/amazon-login-status')
-            .then(res => res.json())
-            .then(data => setAmazonLoggedIn(data.logged_in))
-            .catch(() => { });
-    }, []);
-
-    const handleAmazonLogin = async () => {
-        setLoginLoading(true);
-        toast.info("Opening Amazon sign-in browser. Please sign in...");
-        try {
-            const res = await fetch('http://localhost:8002/api/amazon-login', { method: 'POST' });
-            const data = await res.json();
-            if (data.logged_in) {
-                setAmazonLoggedIn(true);
-                toast.success(data.message);
-            } else {
-                toast.error(data.message);
-            }
-        } catch (err) {
-            toast.error("Login failed. Please try again.");
-        } finally {
-            setLoginLoading(false);
-        }
-    };
-
     const handleAnalyze = async (e) => {
         e.preventDefault();
         if (!url) return;
 
         setLoading(true);
-        setIsAnalyzing(true); // Start analysis loading
+        setIsAnalyzing(true);
         try {
-            const response = await fetch('http://localhost:8002/api/analyze/url', {
+            const response = await fetch(`${BACKEND}/api/analyze/url`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -335,7 +308,7 @@ const UrlAnalysisPage = () => {
             toast.error("Failed to analyze URL. Please try again.");
         } finally {
             setLoading(false);
-            setIsAnalyzing(false); // End analysis loading
+            setIsAnalyzing(false);
         }
     };
 
@@ -353,43 +326,6 @@ const UrlAnalysisPage = () => {
                     Analyze product reviews directly from Amazon or Flipkart links to find the true rating.
                 </p>
             </div>
-
-            {/* Amazon Login Banner */}
-            {!amazonLoggedIn ? (
-                <Card className="border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50">
-                    <CardContent className="pt-4 pb-4">
-                        <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
-                            <div className="flex items-center gap-4 text-center sm:text-left flex-col sm:flex-row">
-                                <div className="w-12 h-12 rounded-2xl bg-blue-100 flex items-center justify-center flex-shrink-0">
-                                    <LogIn className="h-6 w-6 text-blue-600" />
-                                </div>
-                                <div className="flex-1">
-                                    <p className="text-sm font-bold text-blue-900 uppercase tracking-tight">Sign in to Amazon for Full Access</p>
-                                    <p className="text-xs text-blue-700/70 mt-1 max-w-md">Without signing in, only ~8 reviews will be analyzed. Sign in once to analyze ALL reviews.</p>
-                                </div>
-                            </div>
-                            <Button
-                                onClick={handleAmazonLogin}
-                                disabled={loginLoading}
-                                variant="default"
-                                size="sm"
-                                className="bg-blue-600 hover:bg-blue-700 px-8 py-6 rounded-2xl shadow-lg shadow-blue-500/20 font-heading font-black text-[10px] tracking-widest uppercase w-full sm:w-auto"
-                            >
-                                {loginLoading ? (
-                                    <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Waiting...</>
-                                ) : (
-                                    <><LogIn className="h-4 w-4 mr-2" /> Sign in to Amazon</>
-                                )}
-                            </Button>
-                        </div>
-                    </CardContent>
-                </Card>
-            ) : (
-                <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-4 py-2 rounded-lg border border-green-200">
-                    <CheckCircle className="h-4 w-4" />
-                    <span>Amazon session active — all reviews will be analyzed</span>
-                </div>
-            )}
 
             <Card>
                 <CardContent className="pt-6">
@@ -419,9 +355,7 @@ const UrlAnalysisPage = () => {
                     <div className="mt-2 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1">
                             <AlertTriangle className="h-3 w-3" />
-                            {amazonLoggedIn
-                                ? "A browser window will open to scrape all reviews. This may take a few minutes for products with many reviews."
-                                : "Without Amazon login, only ~8 reviews from the product page will be analyzed. Sign in above for full access."}
+                            Analysis uses ScraperAPI to fetch real reviews. May take 1–2 minutes for products with many reviews.
                         </span>
                     </div>
                 </CardContent>

@@ -174,8 +174,15 @@ async def _scrape_amazon_via_scraperapi(url, api_key):
     
     logger.info(f"ASIN: {asin}")
     
+    # Detect Amazon domain (amazon.com vs amazon.in etc.)
+    amazon_domain = "amazon.in"
+    if "amazon.com" in url.lower():
+        amazon_domain = "amazon.com"
+    elif "amazon.co.uk" in url.lower():
+        amazon_domain = "amazon.co.uk"
+    
     # Fetch product page for title and rating summary
-    product_url = f"https://www.amazon.in/dp/{asin}"
+    product_url = f"https://www.{amazon_domain}/dp/{asin}"
     html = await _scraperapi_fetch(product_url, api_key)
     
     product_title = "Amazon Product"
@@ -193,7 +200,7 @@ async def _scrape_amazon_via_scraperapi(url, api_key):
     all_reviews = []
     for page_num in range(1, MAX_PAGES + 1):
         review_url = (
-            f"https://www.amazon.in/product-reviews/{asin}"
+            f"https://www.{amazon_domain}/product-reviews/{asin}"
             f"?reviewerType=all_reviews&pageNumber={page_num}"
         )
         html = await _scraperapi_fetch(review_url, api_key)
