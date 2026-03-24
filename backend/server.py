@@ -583,14 +583,14 @@ async def analyze_url(data: URLAnalysisInput):
 
         if "amazon" in url.lower() or "amzn" in url.lower():
             try:
-                scraped_data = await asyncio.wait_for(scraper.scrape_amazon(url), timeout=90.0)
+                scraped_data = await asyncio.wait_for(scraper.scrape_amazon(url), timeout=300.0)
             except asyncio.TimeoutError:
                 logger.warning("Amazon scraping timed out. Using fallback demo data.")
             except Exception as e:
                 logger.warning(f"Amazon scraping error: {e}. Using fallback demo data.")
         elif "flipkart" in url.lower():
             try:
-                scraped_data = await asyncio.wait_for(scraper.scrape_flipkart(url), timeout=25.0)
+                scraped_data = await asyncio.wait_for(scraper.scrape_flipkart(url), timeout=300.0)
             except asyncio.TimeoutError:
                 logger.warning("Flipkart scraping timed out. Using fallback demo data.")
             except Exception as e:
