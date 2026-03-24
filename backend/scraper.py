@@ -234,8 +234,9 @@ async def _scrape_amazon_via_rapidapi(url, api_key):
     metadata_captured = False
 
     for star in star_ratings:
-        # Fetch 1 or 2 pages per star rating
-        for page_num in [1, 2]:
+        # Fetch up to 5 pages per star rating (approx 30 reviews per star if available)
+        # Total potential: 5 stars * 5 pages * 6-10 reviews = 150+ reviews
+        for page_num in range(1, 6):
             def _fetch_page(asin, country, star, page):
                 try:
                     endpoint = "https://real-time-amazon-data.p.rapidapi.com/product-reviews"
