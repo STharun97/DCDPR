@@ -223,60 +223,83 @@ async def _scrape_amazon_via_rapidapi(url, api_key):
             logger.error(f"RapidAPI fetch error: {e}")
             return None
 
-    # Fetch multiple pages (up to 10) to get more reviews
+    # We'll use a star-loop strategy to get more reviews than the "ALL" filter allowed.
+    # Supported values from API error: ALL, 5_STARS, 4_STARS, 3_STARS, 2_STARS, 1_STARS, POSITIVE, CRITICAL
+    star_ratings = ["5_STARS", "4_STARS", "3_STARS", "2_STARS", "1_STARS"]
+    
     all_raw_reviews = []
     seen_bodies = set()
-    
-    # We'll try to get up to 10 pages (approx 60-100 reviews)
-    max_scrape_pages = 10
-    
-    for page_num in range(1, max_scrape_pages + 1):
-        data = await loop.run_in_executor(None, _fetch_from_rapidapi, asin, country, page_num)
-        
-        if not data or not data.get("data"):
-            logger.warning(f"RapidAPI returned no data on page {page_num}.")
-            break
+    product_title = "Amazon Product"
+    rating_summary = {"overall_rating": 0, "total_ratings": 0}
+    metadata_captured = False
 
-        api_data = data.get("data", {})
-        
-        # On first page, grab metadata
-        if page_num == 1:
-            product_title = api_data.get("product_title") or "Amazon Product"
-            rating_summary = {
-                "overall_rating": api_data.get("product_star_rating"),
-                "total_ratings": api_data.get("product_num_ratings"),
-            }
-        
-        page_reviews = api_data.get("reviews", [])
-        if not page_reviews:
-            logger.info(f"No more reviews found at page {page_num}.")
-            break
+    for star in star_ratings:
+        # Fetch 1 or 2 pages per star rating
+        for page_num in [1, 2]:
+            def _fetch_page(asin, country, star, page):
+                try:
+                    endpoint = "https://real-time-amazon-data.p.rapidapi.com/product-reviews"
+                    headers = {
+                        "x-rapidapi-key": api_key,
+                        "x-rapidapi-host": "real-time-amazon-data.p.rapidapi.com"
+                    }
+                    params = {
+                        "asin": asin,
+                        "country": country,
+                        "star_rating": star,
+                        "page": str(page),
+                        "sort_by": "MOST_RECENT"
+                    }
+                    resp = requests.get(endpoint, headers=headers, params=params, timeout=40)
+                    if resp.status_code == 200:
+                        return resp.json()
+                    return None
+                except Exception as e:
+                    logger.error(f"RapidAPI star-loop error ({star} p{page}): {e}")
+                    return None
+
+            data = await loop.run_in_executor(None, _fetch_page, asin, country, star, page_num)
             
-        # Add reviews from this page, preventing duplicates
-        new_on_this_page = 0
-        for r in page_reviews:
-            body = r.get("review_comment") or r.get("review_body") or r.get("review_text") or ""
-            if body and body not in seen_bodies:
-                seen_bodies.add(body)
-                all_raw_reviews.append(r)
-                new_on_this_page += 1
-        
-        logger.info(f"Page {page_num}: Added {new_on_this_page} new reviews (Total: {len(all_raw_reviews)})")
-        
-        # If this page had very few new reviews, we might be reaching the end
-        if new_on_this_page == 0:
-            break
+            if not data or not data.get("data"):
+                break
+
+            api_data = data.get("data", {})
+            
+            # Capture metadata from first successful request
+            if not metadata_captured:
+                product_title = api_data.get("product_title") or product_title
+                rating_summary = {
+                    "overall_rating": api_data.get("product_star_rating"),
+                    "total_ratings": api_data.get("product_num_ratings"),
+                }
+                metadata_captured = True
+            
+            page_reviews = api_data.get("reviews", [])
+            if not page_reviews:
+                break
+                
+            new_on_this_page = 0
+            for r in page_reviews:
+                body = r.get("review_comment") or r.get("review_body") or r.get("review_text") or ""
+                if body and body not in seen_bodies:
+                    seen_bodies.add(body)
+                    all_raw_reviews.append(r)
+                    new_on_this_page += 1
+            
+            logger.info(f"Star {star} Page {page_num}: Added {new_on_this_page} new reviews (Total: {len(all_raw_reviews)})")
+            
+            # If no new reviews on this page, don't bother with page 2 for this star
+            if new_on_this_page == 0:
+                break
 
     if not all_raw_reviews:
-        logger.warning("No reviews found in RapidAPI response after pagination.")
+        logger.warning("No reviews found in RapidAPI response after star-loop.")
         return None
 
     # Transform to internal format
     all_reviews = []
     for r in all_raw_reviews:
         body = r.get("review_comment") or r.get("review_body") or r.get("review_text") or ""
-        # (body already verified unique above)
-            
         rating_str = r.get("review_star_rating") or ""
         try:
             rating = float(rating_str)
@@ -291,7 +314,7 @@ async def _scrape_amazon_via_rapidapi(url, api_key):
             "source": "Amazon",
         })
 
-    logger.info(f"Final collection: {len(all_reviews)} reviews via RapidAPI for '{product_title}'")
+    logger.info(f"Final collection: {len(all_reviews)} reviews via star-loop for '{product_title}'")
     return {
         "product_title": product_title,
         "reviews": all_reviews,
