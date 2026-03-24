@@ -123,13 +123,16 @@ def _extract_rating_summary(soup):
 
 
 def _scraperapi_fetch_sync(target_url, api_key):
-    """Synchronously fetch a URL via ScraperAPI (free tier, no JS rendering)."""
+    """Synchronously fetch a URL via ScraperAPI with JS rendering enabled."""
     try:
         params = {
             "api_key": api_key,
             "url": target_url,
+            "render": "true",          # Enable JS rendering to bypass Amazon sign-in redirect
+            "country_code": "in",      # Use Indian IP to get amazon.in pages correctly
+            "device_type": "desktop",  # Desktop user agent
         }
-        response = requests.get("http://api.scraperapi.com", params=params, timeout=30)
+        response = requests.get("http://api.scraperapi.com", params=params, timeout=70)
         logger.info(f"ScraperAPI response: {response.status_code} for {target_url[:60]}")
         if response.status_code == 200:
             return response.text
@@ -163,8 +166,8 @@ async def scrape_amazon(url):
 
 
 async def _scrape_amazon_via_scraperapi(url, api_key):
-    """Scrape Amazon reviews using ScraperAPI (works from cloud deployments)."""
-    logger.info(f"Scraping Amazon via ScraperAPI: {url}")
+    """Scrape Amazon reviews using ScraperAPI Structured Data API (works from cloud deployments)."""
+    logger.info(f"Scraping Amazon via ScraperAPI structured API: {url}")
     
     asin = _extract_asin(url)
     if not asin:
@@ -173,66 +176,107 @@ async def _scrape_amazon_via_scraperapi(url, api_key):
     
     logger.info(f"ASIN: {asin}")
     
-    # Detect Amazon domain (amazon.com vs amazon.in etc.)
-    amazon_domain = "amazon.in"
-    if "amazon.com" in url.lower():
-        amazon_domain = "amazon.com"
-    elif "amazon.co.uk" in url.lower():
-        amazon_domain = "amazon.co.uk"
-    
-    # Fetch product page for title and rating summary
-    product_url = f"https://www.{amazon_domain}/dp/{asin}"
-    html = await _scraperapi_fetch(product_url, api_key)
-    
-    product_title = "Amazon Product"
-    rating_summary = {}
-    
-    if html:
-        soup = BeautifulSoup(html, "html.parser")
-        title_elem = soup.select_one("#productTitle")
-        if title_elem:
-            product_title = title_elem.get_text(strip=True)
-        rating_summary = _extract_rating_summary(soup)
-        logger.info(f"Product: {product_title}")
-    
-    # Paginate through review pages
-    all_reviews = []
-    for page_num in range(1, MAX_PAGES + 1):
-        review_url = (
-            f"https://www.{amazon_domain}/product-reviews/{asin}"
-            f"?reviewerType=all_reviews&pageNumber={page_num}"
-        )
-        html = await _scraperapi_fetch(review_url, api_key)
-        if not html:
-            break
-        
-        soup = BeautifulSoup(html, "html.parser")
-        page_reviews = _parse_reviews_from_soup(soup)
-        
-        if not page_reviews:
-            logger.info(f"No reviews on page {page_num}. Done paginating.")
-            break
-        
-        all_reviews.extend(page_reviews)
-        logger.info(f"Page {page_num}: {len(page_reviews)} reviews (total: {len(all_reviews)})")
-    
-    if not all_reviews:
-        logger.warning("No reviews scraped via ScraperAPI.")
+    loop = asyncio.get_event_loop()
+
+    def _fetch_structured(asin, page, country="in"):
+        try:
+            endpoint = "https://api.scraperapi.com/structured/amazon/review"
+            params = {
+                "api_key": api_key,
+                "asin": asin,
+                "country": country,
+                "page": str(page),
+            }
+            resp = requests.get(endpoint, params=params, timeout=60)
+            logger.info(f"ScraperAPI structured page {page}: {resp.status_code}")
+            if resp.status_code == 200:
+                return resp.json()
+            return None
+        except Exception as e:
+            logger.error(f"ScraperAPI structured fetch error: {e}")
+            return None
+
+    # Decide country from URL
+    country = "in" if "amazon.in" in url.lower() else "us"
+
+    # Fetch page 1 to get product info + first batch of reviews
+    data = await loop.run_in_executor(None, _fetch_structured, asin, 1, country)
+
+    # If country=in returns empty, try country=us (some ASINs only exist on .com)
+    if not data or (not data.get("reviews") and not data.get("product", {}).get("name")):
+        logger.info("No data for 'in', retrying with 'us'...")
+        data = await loop.run_in_executor(None, _fetch_structured, asin, 1, "us")
+        if data:
+            country = "us"
+
+    if not data:
+        logger.warning("ScraperAPI structured API returned no data.")
         return None
-    
-    # Deduplicate
+
+    product = data.get("product", {})
+    product_title = product.get("name") or "Amazon Product"
+    all_reviews_raw = data.get("reviews", [])
+
+    # Build rating_summary from structured data
+    rating_summary = {}
+    if data.get("5_star_percentage") is not None:
+        rating_summary = {
+            "overall_rating": None,
+            "total_ratings": data.get("total_reviews"),
+            "star_distribution": {
+                "5": data.get("5_star_percentage", 0),
+                "4": data.get("4_star_percentage", 0),
+                "3": data.get("3_star_percentage", 0),
+                "2": data.get("2_star_percentage", 0),
+                "1": data.get("1_star_percentage", 0),
+            }
+        }
+
+    # Paginate additional pages up to MAX_PAGES
+    for page_num in range(2, MAX_PAGES + 1):
+        pdata = await loop.run_in_executor(None, _fetch_structured, asin, page_num, country)
+        if not pdata or not pdata.get("reviews"):
+            break
+        all_reviews_raw.extend(pdata["reviews"])
+        logger.info(f"Page {page_num}: +{len(pdata['reviews'])} reviews")
+
+    if not all_reviews_raw:
+        logger.warning("No reviews returned by ScraperAPI structured API.")
+        return None
+
+    # Normalize reviews to match our internal format
+    all_reviews = []
     seen = set()
-    unique_reviews = []
-    for r in all_reviews:
-        if r['review_text'] not in seen:
-            seen.add(r['review_text'])
-            unique_reviews.append(r)
-    
-    logger.info(f"Final review count: {len(unique_reviews)} for '{product_title}'")
+    for r in all_reviews_raw:
+        body = r.get("review_comment") or r.get("body") or r.get("content") or ""
+        if not body or body in seen:
+            continue
+        seen.add(body)
+
+        # Rating is usually "5.0 out of 5 stars" or a number
+        raw_rating = r.get("rating") or r.get("star_rating") or ""
+        try:
+            rating = float(str(raw_rating).split()[0])
+        except (ValueError, IndexError):
+            rating = None
+
+        all_reviews.append({
+            "review_text": body,
+            "rating": rating,
+            "author": r.get("reviewer_name") or r.get("author") or "Unknown",
+            "date": r.get("date") or r.get("review_date") or "",
+            "source": "Amazon",
+        })
+
+    if not all_reviews:
+        logger.warning("No usable reviews after parsing ScraperAPI structured data.")
+        return None
+
+    logger.info(f"Total reviews collected via ScraperAPI: {len(all_reviews)} for '{product_title}'")
     return {
-        'product_title': product_title,
-        'reviews': unique_reviews,
-        'rating_summary': rating_summary
+        "product_title": product_title,
+        "reviews": all_reviews,
+        "rating_summary": rating_summary,
     }
 
 
