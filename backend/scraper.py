@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 BROWSER_DATA_DIR = os.path.join(os.path.expanduser("~"), ".fprds_browser_data")
 
 # Maximum pages to paginate through (10 reviews per page)
-MAX_PAGES = 3  # Keep within Render's 30s request timeout (3 pages = ~30 reviews)
+MAX_PAGES = 15  # Scrape up to 15 pages (150 reviews)
 
 # Stealth JavaScript to avoid bot detection
 STEALTH_JS = """
@@ -150,16 +150,9 @@ async def _scraperapi_fetch(target_url, api_key):
 async def scrape_amazon(url):
     """Scrape reviews from an Amazon product URL.
 
-    Uses ScraperAPI (residential proxy) when SCRAPERAPI_KEY env var is set —
-    this works from cloud servers and bypasses Amazon bot detection.
-    Falls back to local Playwright-based scraping if no API key is set.
+    Uses the local Playwright-based scraping technique without ScraperAPI.
     """
-    api_key = os.getenv("SCRAPERAPI_KEY")
-
-    if api_key:
-        return await _scrape_amazon_via_scraperapi(url, api_key)
-    else:
-        return await _scrape_amazon_via_playwright(url)
+    return await _scrape_amazon_via_playwright(url)
 
 
 async def _scrape_amazon_via_scraperapi(url, api_key):
@@ -385,32 +378,40 @@ async def _scrape_amazon_via_playwright(url):
                     all_reviews.extend(page_reviews)
                     logger.info(f"Page {page_num}: {len(page_reviews)} reviews (total: {len(all_reviews)})")
                     
-                    # Find and click "Next" button
-                    next_btn = await page.query_selector('li.a-last a')
-                    if not next_btn:
-                        next_btn = await page.query_selector('a:has-text("Next page")')
-                    
-                    if next_btn:
-                        try:
-                            page_num += 1
-                            await next_btn.click()
-                            await page.wait_for_load_state('domcontentloaded', timeout=15000)
-                            await asyncio.sleep(1.5)
+                    if page_num >= MAX_PAGES:
+                        break
+                        
+                    page_num += 1
+                    try:
+                        # Amazon's new UI loads reviews dynamically via a button
+                        more_btn = page.get_by_text(re.compile(r'show\s+\d*\s*more\s+reviews', re.IGNORECASE))
+                        if not await more_btn.is_visible():
+                            more_btn = page.get_by_text(re.compile(r'more\s+reviews', re.IGNORECASE))
                             
-                            # Check for CAPTCHA or redirect
-                            current_url = page.url
-                            if "/ap/signin" in current_url or "/ax/claim" in current_url:
-                                logger.warning("Sign-in required during pagination. Stopping.")
-                                break
-                            title = await page.title()
-                            if "Robot Check" in title:
-                                logger.warning("CAPTCHA during pagination. Stopping.")
-                                break
-                        except Exception as e:
-                            logger.warning(f"Navigation error on page {page_num}: {e}")
+                        if await more_btn.count() > 0 and await more_btn.first.is_visible():
+                            logger.info(f"Clicking 'more reviews' button for page {page_num}...")
+                            await more_btn.first.click()
+                            await asyncio.sleep(3)  # Wait for new reviews to load on same page
+                            continue
+                            
+                        # Fallback to traditional URL pagination if button is not found
+                        domain = "amazon.in" if "amazon.in" in page.url else "amazon.com"
+                        next_page_url = f"https://www.{domain}/product-reviews/{asin}?reviewerType=all_reviews&pageNumber={page_num}"
+                        logger.info(f"Button not found. Using URL pagination: {next_page_url}")
+                        await page.goto(next_page_url, timeout=30000, wait_until='domcontentloaded')
+                        await asyncio.sleep(2)
+                        
+                        # Check for CAPTCHA or redirect
+                        current_url = page.url
+                        if "/ap/signin" in current_url or "/ax/claim" in current_url:
+                            logger.warning("Sign-in required during pagination. Stopping.")
                             break
-                    else:
-                        logger.info("No 'Next' button found. Reached last page.")
+                        title = await page.title()
+                        if "Robot Check" in title or "CAPTCHA" in title:
+                            logger.warning("CAPTCHA during pagination. Stopping.")
+                            break
+                    except Exception as e:
+                        logger.warning(f"Navigation error on page {page_num}: {e}")
                         break
                 
                 logger.info(f"Total reviews from pagination: {len(all_reviews)}")
