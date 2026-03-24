@@ -153,15 +153,126 @@ async def _scraperapi_fetch(target_url, api_key):
 async def scrape_amazon(url):
     """Scrape reviews from an Amazon product URL.
 
-    Uses ScraperAPI if SCRAPERAPI_KEY env var is set (cloud deployment),
+    Uses RapidAPI if RAPIDAPI_KEY is set (most reliable for cloud),
+    otherwise uses ScraperAPI if SCRAPERAPI_KEY is set,
     otherwise falls back to the local Playwright-based scraper.
     """
-    api_key = os.getenv("SCRAPERAPI_KEY")
-    if api_key:
+    rapidapi_key = os.getenv("RAPIDAPI_KEY")
+    if rapidapi_key:
+        logger.info("RAPIDAPI_KEY found — using RapidAPI for cloud scraping.")
+        return await _scrape_amazon_via_rapidapi(url, rapidapi_key)
+
+    scraperapi_key = os.getenv("SCRAPERAPI_KEY")
+    if scraperapi_key:
         logger.info("SCRAPERAPI_KEY found — using ScraperAPI for cloud scraping.")
-        return await _scrape_amazon_via_scraperapi(url, api_key)
-    logger.info("No SCRAPERAPI_KEY — using local Playwright scraper.")
+        return await _scrape_amazon_via_scraperapi(url, scraperapi_key)
+
+    logger.info("No API keys found — using local Playwright scraper.")
     return await _scrape_amazon_via_playwright(url)
+
+
+async def _scrape_amazon_via_rapidapi(url, api_key):
+    """Scrape Amazon reviews using RapidAPI (Real-Time Amazon Data)."""
+    logger.info(f"Scraping Amazon via RapidAPI (Real-Time Amazon Data): {url}")
+    
+    asin = _extract_asin(url)
+    if not asin:
+        logger.warning("Could not extract ASIN from URL")
+        return None
+    
+    # Detect Amazon country (IN vs US etc.)
+    country = "IN"
+    if "amazon.com" in url.lower():
+        country = "US"
+    elif "amazon.co.uk" in url.lower():
+        country = "GB"
+    
+    logger.info(f"ASIN: {asin}, Country: {country}")
+    
+    loop = asyncio.get_event_loop()
+
+    def _fetch_from_rapidapi(asin, country, page=1):
+        try:
+            # We try 'product-reviews' first as it's the most flexible
+            endpoint = "https://real-time-amazon-data.p.rapidapi.com/product-reviews"
+            headers = {
+                "x-rapidapi-key": api_key,
+                "x-rapidapi-host": "real-time-amazon-data.p.rapidapi.com"
+            }
+            params = {
+                "asin": asin,
+                "country": country,
+                "page": str(page),
+                "sort_by": "TOP_REVIEWS",
+                "star_rating": "ALL"
+            }
+            resp = requests.get(endpoint, headers=headers, params=params, timeout=40)
+            logger.info(f"RapidAPI status: {resp.status_code} for ASIN {asin} page {page}")
+            
+            if resp.status_code == 200:
+                return resp.json()
+            elif resp.status_code == 500:
+                # If product-reviews fails with 500, try top-product-reviews as a fallback
+                logger.warning("RapidAPI product-reviews returned 500, trying top-product-reviews fallback...")
+                alt_endpoint = "https://real-time-amazon-data.p.rapidapi.com/top-product-reviews"
+                resp = requests.get(alt_endpoint, headers=headers, params={"asin": asin, "country": country}, timeout=40)
+                if resp.status_code == 200:
+                    return resp.json()
+            return None
+        except Exception as e:
+            logger.error(f"RapidAPI fetch error: {e}")
+            return None
+
+    # Fetch first page
+    data = await loop.run_in_executor(None, _fetch_from_rapidapi, asin, country, 1)
+    
+    if not data or not data.get("data"):
+        logger.warning("RapidAPI returned no data.")
+        return None
+
+    api_data = data.get("data", {})
+    product_title = api_data.get("product_title") or "Amazon Product"
+    rating_summary = {
+        "overall_rating": api_data.get("product_star_rating"),
+        "total_ratings": api_data.get("product_num_ratings"),
+    }
+    
+    raw_reviews = api_data.get("reviews", [])
+    
+    # Optional: fetch page 2 if needed (RapidAPI usually returns plenty on page 1)
+    # but for project depth, we can stick to page 1 to save credits/time.
+    
+    if not raw_reviews:
+        logger.warning("No reviews found in RapidAPI response.")
+        return None
+
+    # Transform to internal format
+    all_reviews = []
+    for r in raw_reviews:
+        body = r.get("review_body") or r.get("review_text") or ""
+        if not body:
+            continue
+            
+        rating_str = r.get("review_star_rating") or ""
+        try:
+            rating = float(rating_str)
+        except:
+            rating = None
+
+        all_reviews.append({
+            "review_text": body,
+            "rating": rating,
+            "author": r.get("review_author") or "Anonymous",
+            "date": r.get("review_date") or "",
+            "source": "Amazon",
+        })
+
+    logger.info(f"Successfully scraped {len(all_reviews)} reviews via RapidAPI for '{product_title}'")
+    return {
+        "product_title": product_title,
+        "reviews": all_reviews,
+        "rating_summary": rating_summary,
+    }
 
 
 
