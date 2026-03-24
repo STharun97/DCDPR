@@ -233,65 +233,57 @@ async def _scrape_amazon_via_rapidapi(url, api_key):
     rating_summary = {"overall_rating": 0, "total_ratings": 0}
     metadata_captured = False
 
-    for star in star_ratings:
-        # Fetch up to 5 pages per star rating (approx 30 reviews per star if available)
-        # Total potential: 5 stars * 5 pages * 6-10 reviews = 150+ reviews
-        for page_num in range(1, 6):
-            def _fetch_page(asin, country, star, page):
+    # Use asyncio.gather to fetch all star ratings in parallel for speed
+    async def fetch_star_data(star_val):
+        star_reviews = []
+        for p in range(1, 6): # Up to 5 pages per star
+            def _req(s, pnum):
                 try:
                     endpoint = "https://real-time-amazon-data.p.rapidapi.com/product-reviews"
-                    headers = {
-                        "x-rapidapi-key": api_key,
-                        "x-rapidapi-host": "real-time-amazon-data.p.rapidapi.com"
-                    }
-                    params = {
-                        "asin": asin,
-                        "country": country,
-                        "star_rating": star,
-                        "page": str(page),
-                        "sort_by": "MOST_RECENT"
-                    }
+                    headers = {"x-rapidapi-key": api_key, "x-rapidapi-host": "real-time-amazon-data.p.rapidapi.com"}
+                    params = {"asin": asin, "country": country, "star_rating": s, "page": str(pnum), "sort_by": "MOST_RECENT"}
                     resp = requests.get(endpoint, headers=headers, params=params, timeout=40)
-                    if resp.status_code == 200:
-                        return resp.json()
-                    return None
+                    return resp.json() if resp.status_code == 200 else None
                 except Exception as e:
-                    logger.error(f"RapidAPI star-loop error ({star} p{page}): {e}")
+                    logger.error(f"RapidAPI star-loop error ({s} p{pnum}): {e}")
                     return None
 
-            data = await loop.run_in_executor(None, _fetch_page, asin, country, star, page_num)
-            
+            data = await loop.run_in_executor(None, _req, star_val, p)
             if not data or not data.get("data"):
                 break
-
-            api_data = data.get("data", {})
             
-            # Capture metadata from first successful request
-            if not metadata_captured:
-                product_title = api_data.get("product_title") or product_title
-                rating_summary = {
-                    "overall_rating": api_data.get("product_star_rating"),
-                    "total_ratings": api_data.get("product_num_ratings"),
-                }
-                metadata_captured = True
-            
-            page_reviews = api_data.get("reviews", [])
+            page_data = data.get("data", {})
+            page_reviews = page_data.get("reviews", [])
             if not page_reviews:
                 break
                 
-            new_on_this_page = 0
-            for r in page_reviews:
-                body = r.get("review_comment") or r.get("review_body") or r.get("review_text") or ""
-                if body and body not in seen_bodies:
-                    seen_bodies.add(body)
-                    all_raw_reviews.append(r)
-                    new_on_this_page += 1
+            star_reviews.extend(page_reviews)
             
-            logger.info(f"Star {star} Page {page_num}: Added {new_on_this_page} new reviews (Total: {len(all_raw_reviews)})")
-            
-            # If no new reviews on this page, don't bother with page 2 for this star
-            if new_on_this_page == 0:
+            # Capture metadata from the first successful page found
+            nonlocal metadata_captured, product_title, rating_summary
+            if not metadata_captured:
+                product_title = page_data.get("product_title") or product_title
+                rating_summary = {
+                    "overall_rating": page_data.get("product_star_rating"),
+                    "total_ratings": page_data.get("product_num_ratings"),
+                }
+                metadata_captured = True
+                
+            if len(page_reviews) < 6:
                 break
+        return star_reviews
+
+    # Execute parallel tasks
+    star_batches = await asyncio.gather(*[fetch_star_data(s) for s in star_ratings])
+    
+    all_raw_reviews = []
+    seen_bodies = set()
+    for batch in star_batches:
+        for r in batch:
+            body = r.get("review_comment") or r.get("review_body") or r.get("review_text") or ""
+            if body and body not in seen_bodies:
+                seen_bodies.add(body)
+                all_raw_reviews.append(r)
 
     if not all_raw_reviews:
         logger.warning("No reviews found in RapidAPI response after star-loop.")
