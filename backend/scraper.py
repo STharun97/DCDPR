@@ -249,7 +249,7 @@ async def _scrape_amazon_via_rapidapi(url, api_key):
     # Transform to internal format
     all_reviews = []
     for r in raw_reviews:
-        body = r.get("review_body") or r.get("review_text") or ""
+        body = r.get("review_comment") or r.get("review_body") or r.get("review_text") or ""
         if not body:
             continue
             

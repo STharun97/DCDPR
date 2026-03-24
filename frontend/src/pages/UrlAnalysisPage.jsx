@@ -355,7 +355,7 @@ const UrlAnalysisPage = () => {
                     <div className="mt-2 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1">
                             <AlertTriangle className="h-3 w-3" />
-                            Analysis uses ScraperAPI to fetch real reviews. May take 1–2 minutes for products with many reviews.
+                            Analysis uses Real-Time API to fetch real reviews. May take 1–2 minutes for products with many reviews.
                         </span>
                     </div>
                 </CardContent>
