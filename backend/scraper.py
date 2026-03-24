@@ -150,9 +150,16 @@ async def _scraperapi_fetch(target_url, api_key):
 async def scrape_amazon(url):
     """Scrape reviews from an Amazon product URL.
 
-    Uses the local Playwright-based scraping technique without ScraperAPI.
+    Uses ScraperAPI if SCRAPERAPI_KEY env var is set (cloud deployment),
+    otherwise falls back to the local Playwright-based scraper.
     """
+    api_key = os.getenv("SCRAPERAPI_KEY")
+    if api_key:
+        logger.info("SCRAPERAPI_KEY found — using ScraperAPI for cloud scraping.")
+        return await _scrape_amazon_via_scraperapi(url, api_key)
+    logger.info("No SCRAPERAPI_KEY — using local Playwright scraper.")
     return await _scrape_amazon_via_playwright(url)
+
 
 
 async def _scrape_amazon_via_scraperapi(url, api_key):
